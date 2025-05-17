@@ -1,20 +1,27 @@
-import React, { useMemo, useRef } from "react";
+import React, { useCallback, useMemo } from "react";
 import {
   View,
   Text,
-  SectionList,
   TouchableOpacity,
   StyleSheet,
-  useWindowDimensions,
   ScrollView,
   ViewStyle,
-  Platform,
+  FlatList,
 } from "react-native";
 import { ThemedText } from "./ThemedText";
 import { processEmojiSections } from "@/function";
 import { useThemeColor } from "@/hooks/useThemeColor";
 import { EmojiSection } from "@/constants/data";
-
+import Animated, {
+  Extrapolation,
+  interpolate,
+  SharedValue,
+  useAnimatedRef,
+  useAnimatedScrollHandler,
+  useAnimatedStyle,
+  useDerivedValue,
+  useSharedValue,
+} from "react-native-reanimated";
 const PICKER_WIDTH = 300;
 const PICKER_PAD = 5;
 const PICKER_GAP = 12;
@@ -23,32 +30,54 @@ const CHUNK_SIZE = 8;
 const EMOJI_SIZE = PICKER_WIDTH / CHUNK_SIZE;
 const EMOJI_SCALE_RATIO = 1.3;
 const CATEGORY_HEADER_HEIGHT = EMOJI_SIZE + PICKER_PAD;
+const EMOJI_RANGE_MARGIN = 1;
 
 const TOP_CORNER_STYLE: ViewStyle = {
   borderTopLeftRadius: PICKER_RADIUS,
   borderTopRightRadius: PICKER_RADIUS,
 };
 
-const isWeb = Platform.OS === "web";
-
 export type EmojiPickerProps = {
   data: EmojiSection[];
 };
 
+type HeaderItem = {
+  type: "header";
+  title: string;
+};
+
+type RowItem = {
+  type: "row";
+  data: { emoji: string; index: number }[];
+};
+
+const getItemLayout = (
+  _: ArrayLike<FlatListItem> | null | undefined,
+  index: number
+) => ({
+  length: EMOJI_SIZE,
+  offset: EMOJI_SIZE * index,
+  index,
+});
+
+type FlatListItem = HeaderItem | RowItem;
+
 export default function EmojiPicker({ data }: EmojiPickerProps) {
   const barColor = useThemeColor({}, "barColor");
-  const sectionListRef = useRef<SectionList>(null);
-  const { width } = useWindowDimensions();
-  const DATA = useMemo(() => processEmojiSections(data, CHUNK_SIZE), [data]);
+  const flatListRef = useAnimatedRef<FlatList<FlatListItem>>();
+  const scrollY = useSharedValue(0);
 
-  const scrollToSection = (sectionIndex: number) => {
-    sectionListRef.current?.scrollToLocation({
-      sectionIndex,
-      itemIndex: 0,
-      animated: true,
-      viewOffset: EMOJI_SIZE,
-    });
-  };
+  const flatData: FlatListItem[] = useMemo(() => {
+    const processed = processEmojiSections(data, CHUNK_SIZE);
+    const result: FlatListItem[] = [];
+    for (let section of processed) {
+      result.push({ type: "header", title: section.title });
+      for (let row of section.data) {
+        result.push({ type: "row", data: row });
+      }
+    }
+    return result;
+  }, [data]);
 
   return (
     <View
@@ -64,35 +93,92 @@ export default function EmojiPicker({ data }: EmojiPickerProps) {
           { width: PICKER_WIDTH, maxHeight: PICKER_WIDTH },
         ]}
       >
-        <EmojiCategoryBar data={data} onPress={scrollToSection} />
-        <SectionList
-          ref={sectionListRef}
-          sections={DATA}
-          style={TOP_CORNER_STYLE}
-          contentContainerStyle={{
-            paddingTop: CATEGORY_HEADER_HEIGHT,
-            paddingBottom: PICKER_GAP,
-          }}
-          keyExtractor={(item, index) => item + index}
-          renderItem={({ item }) => <EmojiRow items={item} />}
-          renderSectionHeader={({ section }) => {
-            const sectionIndex = data.findIndex(
-              (s) => s.title === section.title
-            );
-            return sectionIndex > 0 ? (
-              <View style={styles.header}>
-                <ThemedText style={styles.headerText} type="defaultSemiBold">
-                  {section.title}
-                </ThemedText>
-              </View>
-            ) : null;
-          }}
-          showsVerticalScrollIndicator={false}
-          initialNumToRender={CHUNK_SIZE}
-          maxToRenderPerBatch={CHUNK_SIZE * 2}
+        <EmojiFlatList
+          data={data}
+          flatData={flatData}
+          scrollY={scrollY}
+          flatListRef={flatListRef}
         />
       </View>
     </View>
+  );
+}
+
+function EmojiFlatList({
+  data,
+  flatData,
+  scrollY,
+  flatListRef,
+}: {
+  data: EmojiSection[];
+  flatData: FlatListItem[];
+  scrollY: SharedValue<number>;
+  flatListRef: any;
+}) {
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (event) => {
+      scrollY.value = event.contentOffset.y;
+    },
+  });
+
+  const scrollToSection = useCallback(
+    (sectionIndex: number) => {
+      const index = flatData.findIndex(
+        (item) =>
+          item.type === "header" && data[sectionIndex].title === item.title
+      );
+      if (index !== -1) {
+        flatListRef.current?.scrollToIndex({
+          index,
+          animated: true,
+          viewOffset: EMOJI_SIZE,
+        });
+      }
+    },
+    [flatData, data, flatListRef]
+  );
+
+  const renderItem = useMemo(
+    () =>
+      ({ item, index }: { item: FlatListItem; index: number }) => {
+        if (item.type === "header") {
+          if (index > 0)
+            return (
+              <View style={styles.header}>
+                <ThemedText style={styles.headerText} type="defaultSemiBold">
+                  {item.title}
+                </ThemedText>
+              </View>
+            );
+        } else if (item.type === "row") {
+          return <EmojiRow items={item.data} index={index} scrollY={scrollY} />;
+        }
+        return null;
+      },
+    [scrollY]
+  );
+
+  return (
+    <>
+      <EmojiCategoryBar data={data} onPress={scrollToSection} />
+      <Animated.FlatList
+        ref={flatListRef}
+        data={flatData}
+        keyExtractor={(_, index) => index.toString()}
+        renderItem={renderItem}
+        onScroll={scrollHandler}
+        contentContainerStyle={{
+          paddingTop: CATEGORY_HEADER_HEIGHT,
+          paddingBottom: PICKER_GAP,
+        }}
+        showsVerticalScrollIndicator={false}
+        initialNumToRender={CHUNK_SIZE}
+        maxToRenderPerBatch={CHUNK_SIZE * 2}
+        removeClippedSubviews
+        getItemLayout={getItemLayout}
+        windowSize={10}
+      />
+    </>
   );
 }
 
@@ -124,7 +210,6 @@ function EmojiCategoryBar({
             aspectRatio: 1,
             alignItems: "center",
             justifyContent: "center",
-            // backgroundColor: text + "10",
             borderRadius: PICKER_RADIUS / 2,
           }}
         >
@@ -135,15 +220,55 @@ function EmojiCategoryBar({
   );
 }
 
-function EmojiRow({ items }: { items: { emoji: string; index: number }[] }) {
+function EmojiRow({
+  items,
+  index,
+  scrollY,
+}: {
+  items: { emoji: string; index: number }[];
+  index: number;
+  scrollY: SharedValue<number>;
+}) {
+  const positionY = index * EMOJI_SIZE;
+  const { startFade, endFade } = useMemo(() => {
+    const chunkHeight = EMOJI_SIZE * CHUNK_SIZE - PICKER_GAP;
+    return {
+      startFade: chunkHeight - EMOJI_SIZE,
+      endFade: chunkHeight,
+    };
+  }, []);
+
+  const EMOJI_SPAN = useMemo(() => EMOJI_SIZE * EMOJI_RANGE_MARGIN, []);
+
+  const rotateX = useDerivedValue(() => {
+    const distanceFromBottom = positionY - scrollY.value;
+
+    const inRange =
+      distanceFromBottom > startFade - EMOJI_SPAN &&
+      distanceFromBottom <= endFade + EMOJI_SPAN;
+
+    return inRange
+      ? interpolate(
+          distanceFromBottom,
+          [startFade, endFade],
+          [0, -Math.PI / 2.5],
+          Extrapolation.CLAMP
+        )
+      : 0;
+  });
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ perspective: 350 }, { rotateX: `${rotateX.value}rad` }],
+  }));
+
   return (
-    <View style={styles.row}>
+    <Animated.View style={[styles.row, animatedStyle]}>
       {items.map((emojiObj) => (
         <View style={styles.emojiContainer} key={emojiObj.index}>
           <Text style={styles.emoji}>{emojiObj.emoji}</Text>
         </View>
       ))}
-    </View>
+    </Animated.View>
   );
 }
 
@@ -182,5 +307,6 @@ const styles = StyleSheet.create({
   },
   row: {
     flexDirection: "row",
+    transformOrigin: "top",
   },
 });
