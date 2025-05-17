@@ -7,6 +7,7 @@ import {
   ScrollView,
   ViewStyle,
   FlatList,
+  Pressable,
 } from "react-native";
 import { ThemedText } from "./ThemedText";
 import { processEmojiSections } from "@/function";
@@ -22,10 +23,12 @@ import Animated, {
   useDerivedValue,
   useSharedValue,
 } from "react-native-reanimated";
+
+// CONFIG
 const PICKER_WIDTH = 300;
 const PICKER_PAD = 5;
 const PICKER_GAP = 12;
-const PICKER_RADIUS = 12;
+const PICKER_RADIUS = 16;
 const CHUNK_SIZE = 8;
 const EMOJI_SIZE = PICKER_WIDTH / CHUNK_SIZE;
 const EMOJI_SCALE_RATIO = 1.3;
@@ -167,6 +170,7 @@ function EmojiFlatList({
         keyExtractor={(_, index) => index.toString()}
         renderItem={renderItem}
         onScroll={scrollHandler}
+        style={TOP_CORNER_STYLE}
         contentContainerStyle={{
           paddingTop: CATEGORY_HEADER_HEIGHT,
           paddingBottom: PICKER_GAP,
@@ -224,11 +228,14 @@ function EmojiRow({
   items,
   index,
   scrollY,
+  onPress,
 }: {
   items: { emoji: string; index: number }[];
   index: number;
   scrollY: SharedValue<number>;
+  onPress?: (emoji: string) => void;
 }) {
+  const text = useThemeColor({}, "text");
   const positionY = index * EMOJI_SIZE;
   const { startFade, endFade } = useMemo(() => {
     const chunkHeight = EMOJI_SIZE * CHUNK_SIZE - PICKER_GAP;
@@ -263,11 +270,21 @@ function EmojiRow({
 
   return (
     <Animated.View style={[styles.row, animatedStyle]}>
-      {items.map((emojiObj) => (
-        <View style={styles.emojiContainer} key={emojiObj.index}>
-          <Text style={styles.emoji}>{emojiObj.emoji}</Text>
-        </View>
-      ))}
+      {items.map((emojiObj) => {
+        const content = <Text style={styles.emoji}>{emojiObj.emoji}</Text>;
+        return (
+          <Pressable
+            style={styles.emojiContainer}
+            key={emojiObj.index}
+            onPress={() => onPress?.(emojiObj.emoji)}
+            // android_ripple={{
+            //   color: text + "90",
+            // }}
+          >
+            {content}
+          </Pressable>
+        );
+      })}
     </Animated.View>
   );
 }
@@ -283,6 +300,7 @@ const styles = StyleSheet.create({
   emoji: {
     fontSize: EMOJI_SIZE / EMOJI_SCALE_RATIO,
     textAlign: "center",
+    lineHeight: EMOJI_SIZE,
   },
   header: {
     height: EMOJI_SIZE,
