@@ -180,7 +180,7 @@ function EmojiFlatList({
         maxToRenderPerBatch={CHUNK_SIZE * 2}
         removeClippedSubviews
         getItemLayout={getItemLayout}
-        windowSize={10}
+        windowSize={5}
       />
     </>
   );
